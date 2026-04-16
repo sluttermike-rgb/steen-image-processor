@@ -5,6 +5,44 @@ import io
 
 app = Flask(__name__)
 
+def decode_image_data(raw_data):
+    """Try multiple approaches to get valid image bytes."""
+    # If it's already bytes, try directly first
+    if isinstance(raw_data, bytes):
+        # Try as-is
+        try:
+            img = Image.open(io.BytesIO(raw_data))
+            img.verify()
+            return raw_data
+        except:
+            pass
+        # Try base64 decode
+        try:
+            decoded = base64.b64decode(raw_data)
+            img = Image.open(io.BytesIO(decoded))
+            img.verify()
+            return decoded
+        except:
+            pass
+        # Try stripping whitespace then base64
+        try:
+            decoded = base64.b64decode(raw_data.strip())
+            img = Image.open(io.BytesIO(decoded))
+            img.verify()
+            return decoded
+        except:
+            pass
+    # If it's a string
+    if isinstance(raw_data, str):
+        try:
+            decoded = base64.b64decode(raw_data)
+            img = Image.open(io.BytesIO(decoded))
+            img.verify()
+            return decoded
+        except:
+            pass
+    raise ValueError("Cannot decode image data")
+
 def process_image(image_bytes, output_width=800, output_height=1067):
     img = Image.open(io.BytesIO(image_bytes)).convert("RGBA")
 
@@ -31,25 +69,24 @@ def process_image(image_bytes, output_width=800, output_height=1067):
 
 @app.route("/process", methods=["POST"])
 def process():
-    # Accept both multipart form and JSON with base64
+    raw_data = None
+
     if request.content_type and "multipart" in request.content_type:
         if "image" not in request.files:
             return jsonify({"error": "Missing image file"}), 400
-        image_bytes = request.files["image"].read()
+        raw_data = request.files["image"].read()
     else:
         data = request.get_json()
         if not data or "image" not in data or not data["image"]:
             return jsonify({"error": "Missing image data"}), 400
-        try:
-            image_bytes = base64.b64decode(data["image"])
-        except Exception as e:
-            return jsonify({"error": f"Base64 decode failed: {str(e)}"}), 400
+        raw_data = data["image"]
 
     try:
+        image_bytes = decode_image_data(raw_data)
         result = process_image(image_bytes)
         return send_file(result, mimetype="image/webp", download_name="output.webp")
     except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"error": str(e), "data_type": str(type(raw_data)), "data_length": len(raw_data) if raw_data else 0}), 500
 
 @app.route("/health", methods=["GET"])
 def health():
